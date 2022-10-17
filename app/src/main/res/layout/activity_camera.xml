@@ -180,6 +180,15 @@
         app:layout_constraintStart_toStartOf="@+id/viewFinder"
         app:layout_constraintTop_toTopOf="@+id/viewFinder" />
 
+    <org.lineageos.aperture.ui.LevelerView
+        android:id="@+id/levelerView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toBottomOf="@+id/viewFinder"
+        app:layout_constraintEnd_toEndOf="@+id/viewFinder"
+        app:layout_constraintStart_toStartOf="@+id/viewFinder"
+        app:layout_constraintTop_toTopOf="@+id/viewFinder" />
+
     <org.lineageos.aperture.ui.CountDownView
         android:id="@+id/countDownView"
         android:layout_width="match_parent"
@@ -209,6 +218,20 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
 
+    <org.lineageos.aperture.ui.VerticalSlider
+        android:id="@+id/exposureLevel"
+        android:layout_width="32dp"
+        android:layout_height="250dp"
+        android:layout_marginEnd="8dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@+id/viewFinder"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@+id/viewFinder"
+        app:thumbColor="@color/white"
+        app:thumbTextColor="@color/black"
+        app:thumbTextSize="10dp"
+        app:trackColor="#7FCCCCCC" />
+
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/primaryBarLayout"
         android:layout_width="0dp"
@@ -224,6 +247,7 @@
             android:layout_height="75dp"
             android:background="@null"
             android:contentDescription="@string/shutter_button_description"
+            android:soundEffectsEnabled="false"
             android:src="@drawable/avd_photo_capture"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintLeft_toLeftOf="parent"

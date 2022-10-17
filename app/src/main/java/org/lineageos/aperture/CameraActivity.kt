@@ -16,6 +16,7 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.AnimatedVectorDrawable
 import android.graphics.drawable.ColorDrawable
+import android.icu.number.NumberFormatter
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -50,7 +51,6 @@ import androidx.camera.view.CameraController
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
 import androidx.camera.view.video.AudioConfig
-import androidx.cardview.widget.CardView
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -71,15 +71,18 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.slider.Slider
 import org.lineageos.aperture.ui.CountDownView
 import org.lineageos.aperture.ui.GridView
+import org.lineageos.aperture.ui.LevelerView
+import org.lineageos.aperture.ui.VerticalSlider
+import org.lineageos.aperture.utils.Camera
 import org.lineageos.aperture.utils.CameraFacing
 import org.lineageos.aperture.utils.CameraMode
 import org.lineageos.aperture.utils.CameraSoundsUtils
 import org.lineageos.aperture.utils.CameraState
 import org.lineageos.aperture.utils.GridMode
-import org.lineageos.aperture.utils.PhysicalCamera
 import org.lineageos.aperture.utils.ShortcutsUtils
 import org.lineageos.aperture.utils.StorageUtils
 import org.lineageos.aperture.utils.TimeUtils
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -91,12 +94,13 @@ open class CameraActivity : AppCompatActivity() {
     private val cameraModeHighlight by lazy { findViewById<MaterialButton>(R.id.cameraModeHighlight) }
     private val countDownView by lazy { findViewById<CountDownView>(R.id.countDownView) }
     private val effectButton by lazy { findViewById<ImageButton>(R.id.effectButton) }
+    private val exposureLevel by lazy { findViewById<VerticalSlider>(R.id.exposureLevel) }
     private val flashButton by lazy { findViewById<ImageButton>(R.id.flashButton) }
     private val flipCameraButton by lazy { findViewById<ImageButton>(R.id.flipCameraButton) }
     private val galleryButton by lazy { findViewById<ImageView>(R.id.galleryButton) }
-    private val galleryButtonCardView by lazy { findViewById<CardView>(R.id.galleryButtonCardView) }
     private val gridButton by lazy { findViewById<ImageButton>(R.id.gridButton) }
     private val gridView by lazy { findViewById<GridView>(R.id.gridView) }
+    private val levelerView by lazy { findViewById<LevelerView>(R.id.levelerView) }
     private val micButton by lazy { findViewById<ImageButton>(R.id.micButton) }
     private val photoModeButton by lazy { findViewById<MaterialButton>(R.id.photoModeButton) }
     private val primaryBarLayout by lazy { findViewById<ConstraintLayout>(R.id.primaryBarLayout) }
@@ -135,7 +139,7 @@ open class CameraActivity : AppCompatActivity() {
             updatePrimaryBarButtons()
         }
 
-    private lateinit var camera: PhysicalCamera
+    private lateinit var camera: Camera
 
     private lateinit var audioConfig: AudioConfig
 
@@ -173,6 +177,9 @@ open class CameraActivity : AppCompatActivity() {
                 }
                 MSG_HIDE_FOCUS_RING -> {
                     viewFinderFocus.visibility = View.GONE
+                }
+                MSG_HIDE_EXPOSURE_SLIDER -> {
+                    exposureLevel.visibility = View.GONE
                 }
             }
         }
@@ -289,7 +296,7 @@ open class CameraActivity : AppCompatActivity() {
         cameraSoundsUtils = CameraSoundsUtils(sharedPreferences)
 
         // Initialize camera mode and facing
-        cameraMode = sharedPreferences.lastCameraMode
+        cameraMode = overrideInitialCameraMode() ?: sharedPreferences.lastCameraMode
         cameraFacing = sharedPreferences.lastCameraFacing
 
         // Handle intent
@@ -364,6 +371,11 @@ open class CameraActivity : AppCompatActivity() {
             return@setOnTouchListener false
         }
         viewFinder.setOnClickListener { view ->
+            // Reset exposure level to 0 EV
+            cameraController.cameraControl?.setExposureCompensationIndex(0)
+            exposureLevel.progress = 0.5f
+
+            exposureLevel.isVisible = true
             viewFinderTouchEvent?.let {
                 viewFinderFocus.x = it.x - (viewFinderFocus.width / 2)
                 viewFinderFocus.y = it.y - (viewFinderFocus.height / 2)
@@ -371,6 +383,8 @@ open class CameraActivity : AppCompatActivity() {
                 viewFinderFocus.x = (view.width - viewFinderFocus.width) / 2f
                 viewFinderFocus.y = (view.height - viewFinderFocus.height) / 2f
             }
+            handler.removeMessages(MSG_HIDE_EXPOSURE_SLIDER)
+            handler.sendMessageDelayed(handler.obtainMessage(MSG_HIDE_EXPOSURE_SLIDER), 2000)
         }
 
         // Observe preview stream state
@@ -405,6 +419,20 @@ open class CameraActivity : AppCompatActivity() {
         }
         zoomLevel.setLabelFormatter {
             "%.1fx".format(cameraController.zoomState.value?.zoomRatio)
+        }
+
+        // Set expose level callback & text formatter
+        exposureLevel.onProgressChangedByUser = {
+            cameraController.cameraControl?.setExposureCompensationIndex(
+                Int.mapToRange(camera.exposureCompensationRange, it)
+            )
+
+            handler.removeMessages(MSG_HIDE_EXPOSURE_SLIDER)
+            handler.sendMessageDelayed(handler.obtainMessage(MSG_HIDE_EXPOSURE_SLIDER), 2000)
+        }
+        exposureLevel.textFormatter = {
+            EXPOSURE_LEVEL_FORMATTER.format(Int.mapToRange(camera.exposureCompensationRange, it))
+                .toString()
         }
 
         // Set primary bar button callbacks
@@ -464,6 +492,9 @@ open class CameraActivity : AppCompatActivity() {
 
         // Set bright screen
         setBrightScreen(sharedPreferences.brightScreen)
+
+        // Set leveler
+        setLeveler(sharedPreferences.leveler)
 
         // Reset tookSomething state
         tookSomething = false
@@ -535,6 +566,12 @@ open class CameraActivity : AppCompatActivity() {
             else -> super.onKeyUp(keyCode, event)
         }
     }
+
+    /**
+     * This is a method that can be overridden to set the initial camera mode and facing.
+     * It's gonna have priority over shared preferences and intents.
+     */
+    protected open fun overrideInitialCameraMode(): CameraMode? = null
 
     private fun startShutterAnimation(shutterAnimation: ShutterAnimation) {
         // Get appropriate drawable
@@ -722,7 +759,7 @@ open class CameraActivity : AppCompatActivity() {
 
         // Get a stable reference to CameraInfo
         // We can hardcode the first one in the filter as long as we use DEFAULT_*_CAMERA
-        camera = PhysicalCamera(cameraSelector.filter(cameraProvider.availableCameraInfos).first())
+        camera = Camera(cameraSelector.filter(cameraProvider.availableCameraInfos).first())
 
         // Get the supported vendor extensions for the given camera selector
         supportedExtensionModes = extensionsManager.getSupportedModes(cameraSelector)
@@ -732,9 +769,22 @@ open class CameraActivity : AppCompatActivity() {
             sharedPreferences.photoEffect = ExtensionMode.NONE
         }
 
-        // Fallback to highest supported video quality
-        if (!camera.supportedVideoQualities.contains(videoQuality)) {
-            sharedPreferences.videoQuality = camera.supportedVideoQualities.first()
+        if (camera.supportedVideoQualities.isEmpty()) {
+            // Hide video mode button
+            videoModeButton.isVisible = false
+
+            // Switch to photo mode if we are in video mode
+            if (cameraMode == CameraMode.VIDEO) {
+                changeCameraMode(CameraMode.PHOTO)
+            }
+        } else {
+            // Show video mode button
+            videoModeButton.isVisible = true
+
+            // Fallback to highest supported video quality
+            if (!camera.supportedVideoQualities.contains(videoQuality)) {
+                sharedPreferences.videoQuality = camera.supportedVideoQualities.first()
+            }
         }
 
         // Initialize the use case we want and set its properties
@@ -791,6 +841,11 @@ open class CameraActivity : AppCompatActivity() {
         setGridMode(sharedPreferences.lastGridMode)
         setFlashMode(sharedPreferences.photoFlashMode)
         setMicrophoneMode(sharedPreferences.lastMicMode)
+
+        // Reset exposure level
+        exposureLevel.progress = 0.5f
+        exposureLevel.steps =
+            camera.exposureCompensationRange.upper - camera.exposureCompensationRange.lower
 
         // Update icons from last state
         updateCameraModeButtons()
@@ -1188,6 +1243,10 @@ open class CameraActivity : AppCompatActivity() {
         }
     }
 
+    private fun setLeveler(enabled: Boolean) {
+        levelerView.isVisible = enabled
+    }
+
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
     }
@@ -1347,5 +1406,10 @@ open class CameraActivity : AppCompatActivity() {
 
         private const val MSG_HIDE_ZOOM_SLIDER = 0
         private const val MSG_HIDE_FOCUS_RING = 1
+        private const val MSG_HIDE_EXPOSURE_SLIDER = 2
+
+        private val EXPOSURE_LEVEL_FORMATTER = NumberFormatter.with()
+            .locale(Locale.US)
+            .sign(NumberFormatter.SignDisplay.EXCEPT_ZERO)
     }
 }
