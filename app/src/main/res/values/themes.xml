@@ -1,6 +1,6 @@
 <resources>
     <!-- Base application theme. -->
-    <style name="Theme.Aperture" parent="Theme.Material3.Dark">
+    <style name="Theme.Aperture" parent="Theme.Material3.Dark.NoActionBar">
         <!-- Primary brand color. -->
         <item name="colorPrimary">@color/white</item>
         <item name="colorPrimaryVariant">@color/white</item>
@@ -28,6 +28,11 @@
     <!-- Settings activity theme. -->
     <style name="Theme.Aperture.Settings" parent="Theme.Aperture">
         <item name="android:switchStyle">@style/Theme.Aperture.Settings.Switch</item>
+
+        <item name="android:statusBarColor">?android:attr/colorBackground</item>
+
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
     </style>
 
     <!-- Settings switch theme. -->
@@ -62,5 +67,16 @@
     <!-- Video duration button theme -->
     <style name="ApertureVideoDurationButton" parent="@style/ApertureModeSelectorButton">
         <item name="android:backgroundTint">@color/rec_red</item>
+    </style>
+
+    <!-- Collapsing toolbar style -->
+    <style name="ApertureToolbarCollapsed" parent="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textSize">20sp</item>
+    </style>
+
+    <style name="ApertureToolbarExpanded" parent="ApertureToolbarCollapsed">
+        <item name="android:textSize">36sp</item>
+        <item name="android:drawablePadding">10dp</item>
     </style>
 </resources>
