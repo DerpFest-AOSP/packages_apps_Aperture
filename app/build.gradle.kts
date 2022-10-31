@@ -54,7 +54,7 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.5.1")
     implementation("androidx.preference:preference:1.2.0")
-    implementation("com.google.android.material:material:1.8.0-alpha01")
+    implementation("com.google.android.material:material:1.8.0-alpha02")
 
     // CameraX core library using the camera2 implementation
     val cameraxVersion = "1.2.0-beta02"
@@ -186,8 +186,8 @@ tasks.register("generateBp") {
 
         // Parse dependencies
         val dependencies =
-            it.file.parentFile.parentFile.walk().first { file -> file.extension == "pom" }
-                .let { file ->
+            it.file.parentFile.parentFile.walk().filter { file -> file.extension == "pom" }
+                .map { file ->
                     val ret = mutableListOf<String>()
 
                     val pom = XmlParser().parse(file)
@@ -205,7 +205,7 @@ tasks.register("generateBp") {
                     }
 
                     ret
-                }
+                }.flatten()
 
         var targetSdkVersion = android.defaultConfig.minSdk
         var minSdkVersion = 14
