@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "org.lineageos.aperture.dev"
-        minSdk = 31
+        minSdk = 26
         targetSdk = 33
         versionCode = 1
         versionName = "1.0"
@@ -207,7 +207,7 @@ tasks.register("generateBp") {
                     ret
                 }.flatten()
 
-        var targetSdkVersion = android.defaultConfig.minSdk
+        var targetSdkVersion = android.defaultConfig.targetSdk
         var minSdkVersion = 14
 
         // Extract AndroidManifest.xml for AARs
