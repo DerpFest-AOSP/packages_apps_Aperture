@@ -1,3 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     SPDX-FileCopyrightText: 2022 The LineageOS Project
+     SPDX-License-Identifier: Apache-2.0
+-->
 <resources>
     <!-- Base application theme. -->
     <style name="Theme.Aperture" parent="Theme.Material3.Dark.NoActionBar">
@@ -11,7 +16,7 @@
         <item name="colorOnSecondary">@color/black</item>
         <!-- Secondary container -->
         <item name="colorOnSecondaryContainer">@color/white</item>
-        <item name="colorSecondaryContainer">#2a3232</item>
+        <item name="colorSecondaryContainer">@color/gray_60</item>
         <!-- Status bar color. -->
         <item name="android:statusBarColor">?attr/colorOnPrimary</item>
         <!-- Customize your theme here. -->
@@ -65,19 +70,6 @@
     <style name="Theme.Aperture.Camera.SecondaryBottomBarButton" parent="Theme.Aperture.Camera.SecondaryBarButton">
         <item name="android:layout_width">40dp</item>
         <item name="android:layout_height">40dp</item>
-    </style>
-
-    <!-- Lens selector button style -->
-    <style name="Theme.Aperture.Camera.LensSelectorButton">
-        <item name="tint">@color/white</item>
-        <item name="backgroundTint">@color/lens_selector_button_background</item>
-        <item name="android:background">@drawable/lens_selector_button_background</item>
-        <item name="android:layout_width">32dp</item>
-        <item name="android:layout_height">32dp</item>
-        <item name="android:paddingHorizontal">0dp</item>
-        <item name="android:textAlignment">center</item>
-        <item name="android:textColor">@color/white</item>
-        <item name="android:textSize">10dp</item>
     </style>
 
     <!-- Camera mode bar icons theme -->

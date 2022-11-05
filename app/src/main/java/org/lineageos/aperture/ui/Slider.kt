@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2022 The LineageOS Project
- *
+ * SPDX-FileCopyrightText: 2022 The LineageOS Project
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -64,10 +63,12 @@ abstract class Slider @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas?) {
-        super.onDraw(canvas!!)
+        super.onDraw(canvas)
 
-        drawTrack(canvas)
-        drawThumb(canvas)
+        canvas?.let {
+            drawTrack(it)
+            drawThumb(it)
+        }
     }
 
     abstract fun track(): RectF

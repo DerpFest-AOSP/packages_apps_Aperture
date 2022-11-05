@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2022 The LineageOS Project
- *
+ * SPDX-FileCopyrightText: 2022 The LineageOS Project
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -30,9 +29,6 @@ class LensSelectorLayout(context: Context, attrs: AttributeSet?) : LinearLayoutC
 
     private val buttonToCamera = mutableMapOf<Button, Camera>()
     private val buttonToFocalLength = mutableMapOf<Button, Float>()
-
-    private val numLenses: Int
-        get() = if (usesFocalLength) buttonToFocalLength.size else buttonToCamera.size
 
     private var usesFocalLength = false
     private var currentFocalLength = 0f
@@ -87,6 +83,7 @@ class LensSelectorLayout(context: Context, attrs: AttributeSet?) : LinearLayoutC
         updateButtonsAttributes()
     }
 
+    @SuppressLint("InflateParams")
     private fun inflateButton(): Button {
         val button = layoutInflater.inflate(R.layout.lens_selector_button, null) as Button
         return button.apply {

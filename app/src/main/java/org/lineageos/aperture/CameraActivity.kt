@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2022 The LineageOS Project
- *
+ * SPDX-FileCopyrightText: 2022 The LineageOS Project
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -935,7 +934,7 @@ open class CameraActivity : AppCompatActivity() {
     /**
      * Change the current camera mode and restarts the stream
      */
-    protected fun changeCameraMode(cameraMode: CameraMode) {
+    private fun changeCameraMode(cameraMode: CameraMode) {
         if (!canRestartCamera()) {
             return
         }
