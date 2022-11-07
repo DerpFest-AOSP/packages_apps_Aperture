@@ -27,6 +27,7 @@ import android.os.Looper
 import android.os.Message
 import android.provider.MediaStore
 import android.util.Log
+import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -88,6 +89,7 @@ import org.lineageos.aperture.utils.StorageUtils
 import org.lineageos.aperture.utils.TimeUtils
 import java.io.FileNotFoundException
 import java.util.concurrent.ExecutorService
+import kotlin.math.abs
 
 @androidx.camera.camera2.interop.ExperimentalCamera2Interop
 @androidx.camera.core.ExperimentalZeroShutterLag
@@ -181,6 +183,38 @@ open class CameraActivity : AppCompatActivity() {
     }
 
     private lateinit var cameraSoundsUtils: CameraSoundsUtils
+
+    private val gestureDetector by lazy {
+        GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                viewFinderTouchEvent = e
+                return false
+            }
+
+            override fun onFling(
+                e1: MotionEvent, e2: MotionEvent, velocityX: Float, velocityY: Float
+            ): Boolean {
+                if (abs(e1.x - e2.x) > 75 * resources.displayMetrics.density) {
+                    if (e2.x > e1.x) {
+                        // Left to right
+                        when (cameraMode) {
+                            CameraMode.PHOTO -> changeCameraMode(CameraMode.QR)
+                            CameraMode.VIDEO -> changeCameraMode(CameraMode.PHOTO)
+                            CameraMode.QR -> changeCameraMode(CameraMode.VIDEO)
+                        }
+                    } else {
+                        // Right to left
+                        when (cameraMode) {
+                            CameraMode.PHOTO -> changeCameraMode(CameraMode.VIDEO)
+                            CameraMode.VIDEO -> changeCameraMode(CameraMode.QR)
+                            CameraMode.QR -> changeCameraMode(CameraMode.PHOTO)
+                        }
+                    }
+                }
+                return true
+            }
+        })
+    }
 
     private val handler = object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
@@ -404,16 +438,7 @@ open class CameraActivity : AppCompatActivity() {
 
         // Observe manual focus
         viewFinder.setOnTouchListener { _, event ->
-            val isSingleTouch = event.pointerCount == 1
-            val isUpEvent = event.action == MotionEvent.ACTION_UP
-            val notALongPress = (event.eventTime - event.downTime
-                    < ViewConfiguration.getLongPressTimeout())
-            if (isSingleTouch && isUpEvent && notALongPress) {
-                // If the event is a click, invoke tap-to-focus and forward it to user's
-                // OnClickListener#onClick.
-                viewFinderTouchEvent = event
-            }
-            return@setOnTouchListener false
+            return@setOnTouchListener gestureDetector.onTouchEvent(event)
         }
         viewFinder.setOnClickListener { view ->
             // Reset exposure level to 0 EV
@@ -903,11 +928,13 @@ open class CameraActivity : AppCompatActivity() {
         setGridMode(
             if (cameraMode != CameraMode.QR) sharedPreferences.lastGridMode else GridMode.OFF
         )
-        setFlashMode(when (cameraMode) {
-            CameraMode.PHOTO -> sharedPreferences.photoFlashMode
-            CameraMode.VIDEO -> sharedPreferences.videoFlashMode
-            CameraMode.QR -> FlashMode.OFF
-        })
+        setFlashMode(
+            when (cameraMode) {
+                CameraMode.PHOTO -> sharedPreferences.photoFlashMode
+                CameraMode.VIDEO -> sharedPreferences.videoFlashMode
+                CameraMode.QR -> FlashMode.OFF
+            }
+        )
         setMicrophoneMode(sharedPreferences.lastMicMode)
 
         // Reset exposure level
@@ -1256,16 +1283,18 @@ open class CameraActivity : AppCompatActivity() {
      * Cycle flash mode
      */
     private fun cycleFlashMode() {
-        setFlashMode(when (cameraMode) {
-            CameraMode.PHOTO -> cameraController.flashMode.next()
-            CameraMode.VIDEO ->
-                if (cameraController.flashMode != FlashMode.OFF) {
-                    FlashMode.OFF
-                } else {
-                    FlashMode.TORCH
-                }
-            else -> FlashMode.OFF
-        })
+        setFlashMode(
+            when (cameraMode) {
+                CameraMode.PHOTO -> cameraController.flashMode.next()
+                CameraMode.VIDEO ->
+                    if (cameraController.flashMode != FlashMode.OFF) {
+                        FlashMode.OFF
+                    } else {
+                        FlashMode.TORCH
+                    }
+                else -> FlashMode.OFF
+            }
+        )
     }
 
     /**
