@@ -27,57 +27,31 @@ class LensSelectorLayout(context: Context, attrs: AttributeSet?) : LinearLayoutC
 
     private lateinit var activeCamera: Camera
 
-    private val buttonToCamera = mutableMapOf<Button, Camera>()
-    private val buttonToFocalLength = mutableMapOf<Button, Float>()
+    private val buttonToZoomRatio = mutableMapOf<Button, Float>()
 
-    private var usesFocalLength = false
-    private var currentFocalLength = 0f
+    private val buttonToCamera = mutableMapOf<Button, Camera>()
 
     var onCameraChangeCallback: (camera: Camera) -> Unit = {}
-    var onFocalLengthChangeCallback: (focalLength: Float) -> Unit = {}
 
     fun setCamera(activeCamera: Camera, availableCameras: Collection<Camera>) {
         this.activeCamera = activeCamera
 
         removeAllViews()
+        buttonToZoomRatio.clear()
+
         buttonToCamera.clear()
-        buttonToFocalLength.clear()
 
-        usesFocalLength = activeCamera.isLogical && availableCameras.size == 1
-
-        if (usesFocalLength) {
-            val mainMm35FocalLength = activeCamera.mm35FocalLengths!![0]
-            val sensorSize = activeCamera.sensorSize!!
-            val zoomRatioToFocalLength = activeCamera.focalLengths.associateBy {
-                Camera.getMm35FocalLength(it, sensorSize) / mainMm35FocalLength
-            }
-            for ((zoomRatio, focalLength) in zoomRatioToFocalLength.toSortedMap()) {
-                val button = inflateButton().apply {
-                    setOnClickListener {
-                        buttonToFocalLength[it]?.let { focalLength ->
-                            onFocalLengthChangeCallback(focalLength)
-                            currentFocalLength = focalLength
-                        }
-                    }
-                    text = formatZoomRatio(zoomRatio)
+        for (camera in availableCameras.sortedBy { it.intrinsicZoomRatio }) {
+            val button = inflateButton().apply {
+                setOnClickListener {
+                    buttonToCamera[it]?.let(onCameraChangeCallback)
                 }
-
-                addView(button)
-                buttonToFocalLength[button] = focalLength
+                text = formatZoomRatio(camera.intrinsicZoomRatio)
             }
-            currentFocalLength = buttonToFocalLength.values.first()
-        } else {
-            for (camera in availableCameras.sortedBy { it.zoomRatio }) {
-                val button = inflateButton().apply {
-                    setOnClickListener {
-                        buttonToCamera[it]?.let(onCameraChangeCallback)
-                    }
-                    text = formatZoomRatio(camera.zoomRatio)
-                }
 
-                addView(button)
-                buttonToCamera[button] = camera
-            }
+            addView(button)
+            buttonToCamera[button] = camera
+            buttonToZoomRatio[button] = camera.intrinsicZoomRatio
         }
 
         updateButtonsAttributes()
@@ -94,22 +68,19 @@ class LensSelectorLayout(context: Context, attrs: AttributeSet?) : LinearLayoutC
     }
 
     private fun updateButtonsAttributes() {
-        if (usesFocalLength) {
-            for ((button, focalLength) in buttonToFocalLength) {
-                updateButtonAttributes(button, focalLength == currentFocalLength)
-            }
-        } else {
-            for ((button, camera) in buttonToCamera) {
-                updateButtonAttributes(button, camera == activeCamera)
-            }
+        for ((button, camera) in buttonToCamera) {
+            updateButtonAttributes(button, camera == activeCamera)
         }
     }
 
     @SuppressLint("SetTextI18n")
     private fun updateButtonAttributes(button: Button, currentCamera: Boolean) {
         button.isEnabled = !currentCamera
-        if (currentCamera) {
-            button.text = "${button.text}×"
+        val formattedZoomRatio = formatZoomRatio(buttonToZoomRatio[button]!!)
+        button.text = if (currentCamera) {
+            "${formattedZoomRatio}×"
+        } else {
+            formattedZoomRatio
         }
     }
 

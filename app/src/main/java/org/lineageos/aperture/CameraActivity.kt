@@ -31,7 +31,6 @@ import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.HorizontalScrollView
@@ -39,6 +38,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -82,9 +82,11 @@ import org.lineageos.aperture.utils.CameraMode
 import org.lineageos.aperture.utils.CameraSoundsUtils
 import org.lineageos.aperture.utils.CameraState
 import org.lineageos.aperture.utils.FlashMode
+import org.lineageos.aperture.utils.Framerate
 import org.lineageos.aperture.utils.GridMode
 import org.lineageos.aperture.utils.MediaType
 import org.lineageos.aperture.utils.ShortcutsUtils
+import org.lineageos.aperture.utils.StabilizationMode
 import org.lineageos.aperture.utils.StorageUtils
 import org.lineageos.aperture.utils.TimeUtils
 import java.io.FileNotFoundException
@@ -94,7 +96,9 @@ import kotlin.math.abs
 @androidx.camera.camera2.interop.ExperimentalCamera2Interop
 @androidx.camera.core.ExperimentalZeroShutterLag
 @androidx.camera.view.video.ExperimentalVideo
+@androidx.media3.common.util.UnstableApi
 open class CameraActivity : AppCompatActivity() {
+    // Views
     private val aspectRatioButton by lazy { findViewById<Button>(R.id.aspectRatioButton) }
     private val cameraModeHighlight by lazy { findViewById<MaterialButton>(R.id.cameraModeHighlight) }
     private val capturePreviewLayout by lazy { findViewById<CapturePreviewLayout>(R.id.capturePreviewLayout) }
@@ -120,6 +124,7 @@ open class CameraActivity : AppCompatActivity() {
     private val shutterButton by lazy { findViewById<ImageButton>(R.id.shutterButton) }
     private val timerButton by lazy { findViewById<Button>(R.id.timerButton) }
     private val videoDuration by lazy { findViewById<MaterialButton>(R.id.videoDuration) }
+    private val videoFramerateButton by lazy { findViewById<Button>(R.id.videoFramerateButton) }
     private val videoModeButton by lazy { findViewById<MaterialButton>(R.id.videoModeButton) }
     private val videoQualityButton by lazy { findViewById<Button>(R.id.videoQualityButton) }
     private val videoRecordingStateButton by lazy { findViewById<ImageButton>(R.id.videoRecordingStateButton) }
@@ -127,20 +132,25 @@ open class CameraActivity : AppCompatActivity() {
     private val viewFinderFocus by lazy { findViewById<ImageView>(R.id.viewFinderFocus) }
     private val zoomLevel by lazy { findViewById<HorizontalSlider>(R.id.zoomLevel) }
 
+    // System services
     private val keyguardManager by lazy { getSystemService(KeyguardManager::class.java) }
     private val locationManager by lazy { getSystemService(LocationManager::class.java) }
 
-    private val imageAnalyzer by lazy { QrImageAnalyzer(this) }
-
+    // Core camera utils
     private lateinit var cameraManager: CameraManager
     private val cameraController: LifecycleCameraController
         get() = cameraManager.cameraController
     private val cameraExecutor: ExecutorService
         get() = cameraManager.cameraExecutor
+    private lateinit var cameraSoundsUtils: CameraSoundsUtils
+    private val sharedPreferences by lazy {
+        PreferenceManager.getDefaultSharedPreferences(this)
+    }
 
+    // Current camera state
+    private lateinit var camera: Camera
     private lateinit var cameraMode: CameraMode
-    private lateinit var cameraFacing: CameraFacing
-
+    private lateinit var initialCameraFacing: CameraFacing
     private var singleCaptureMode = false
         set(value) {
             field = value
@@ -148,42 +158,32 @@ open class CameraActivity : AppCompatActivity() {
             updatePrimaryBarButtons()
             updateCameraModeButtons()
         }
-
     private var cameraState = CameraState.IDLE
         set(value) {
             field = value
             updateSecondaryBarButtons()
             updatePrimaryBarButtons()
         }
-
-    private lateinit var camera: Camera
-
-    private lateinit var audioConfig: AudioConfig
-
-    private val aspectRatio: Int
-        get() = sharedPreferences.aspectRatio
-
-    private val extensionMode: Int
-        get() = sharedPreferences.photoEffect
-
     private var tookSomething: Boolean = false
         set(value) {
             field = value
             updateGalleryButton()
         }
 
-    private var viewFinderTouchEvent: MotionEvent? = null
-
-    private val videoQuality: Quality
-        get() = sharedPreferences.videoQuality
+    // Video
+    private val supportedVideoQualities: List<Quality>
+        get() = camera.supportedVideoQualities.keys.toList()
+    private val supportedVideoFramerates: List<Framerate>
+        get() = camera.supportedVideoQualities.getOrDefault(
+            sharedPreferences.videoQuality, listOf()
+        )
+    private lateinit var audioConfig: AudioConfig
     private var recording: Recording? = null
 
-    private val sharedPreferences by lazy {
-        PreferenceManager.getDefaultSharedPreferences(this)
-    }
+    // QR
+    private val imageAnalyzer by lazy { QrImageAnalyzer(this) }
 
-    private lateinit var cameraSoundsUtils: CameraSoundsUtils
-
+    private var viewFinderTouchEvent: MotionEvent? = null
     private val gestureDetector by lazy {
         GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapUp(e: MotionEvent): Boolean {
@@ -313,11 +313,11 @@ open class CameraActivity : AppCompatActivity() {
         // Shortcuts
         ShortcutsUtils.SHORTCUT_ID_SELFIE to {
             cameraMode = CameraMode.PHOTO
-            cameraFacing = CameraFacing.FRONT
+            initialCameraFacing = CameraFacing.FRONT
         },
         ShortcutsUtils.SHORTCUT_ID_VIDEO to {
             cameraMode = CameraMode.VIDEO
-            cameraFacing = CameraFacing.BACK
+            initialCameraFacing = CameraFacing.BACK
         },
         ShortcutsUtils.SHORTCUT_ID_QR to {
             cameraMode = CameraMode.QR
@@ -353,7 +353,7 @@ open class CameraActivity : AppCompatActivity() {
 
         // Initialize camera mode and facing
         cameraMode = overrideInitialCameraMode() ?: sharedPreferences.lastCameraMode
-        cameraFacing = sharedPreferences.lastCameraFacing
+        initialCameraFacing = sharedPreferences.lastCameraFacing
 
         // Handle intent
         intent.action?.let {
@@ -377,11 +377,12 @@ open class CameraActivity : AppCompatActivity() {
         }
 
         // Select a camera
-        camera = cameraManager.getCameraOfFacingOrFirstAvailable(cameraFacing, cameraMode)
+        camera = cameraManager.getCameraOfFacingOrFirstAvailable(initialCameraFacing, cameraMode)
 
         // Set secondary top bar button callbacks
         aspectRatioButton.setOnClickListener { cycleAspectRatio() }
         videoQualityButton.setOnClickListener { cycleVideoQuality() }
+        videoFramerateButton.setOnClickListener { cycleVideoFramerate() }
         effectButton.setOnClickListener { cyclePhotoEffects() }
         gridButton.setOnClickListener { cycleGridMode() }
         timerButton.setOnClickListener { toggleTimerMode() }
@@ -561,9 +562,6 @@ open class CameraActivity : AppCompatActivity() {
                 bindCameraUseCases()
             }
         }
-        lensSelectorLayout.onFocalLengthChangeCallback = {
-            cameraController.setZoomRatio(it / camera.focalLengths.first())
-        }
 
         // Set capture preview callback
         capturePreviewLayout.onChoiceCallback = { uri ->
@@ -621,7 +619,9 @@ open class CameraActivity : AppCompatActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        return when (keyCode) {
+        return if (capturePreviewLayout.isVisible) {
+            super.onKeyDown(keyCode, event)
+        } else when (keyCode) {
             KeyEvent.KEYCODE_FOCUS -> {
                 if (event?.repeatCount == 1) {
                     viewFinderTouchEvent = null
@@ -642,7 +642,9 @@ open class CameraActivity : AppCompatActivity() {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-        return when (keyCode) {
+        return if (capturePreviewLayout.isVisible) {
+            super.onKeyUp(keyCode, event)
+        } else when (keyCode) {
             KeyEvent.KEYCODE_CAMERA,
             KeyEvent.KEYCODE_VOLUME_UP,
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
@@ -862,7 +864,7 @@ open class CameraActivity : AppCompatActivity() {
         }
 
         // Fallback to ExtensionMode.NONE if necessary
-        if (!camera.supportsExtensionMode(extensionMode)) {
+        if (!camera.supportsExtensionMode(sharedPreferences.photoEffect)) {
             sharedPreferences.photoEffect = ExtensionMode.NONE
         }
 
@@ -873,15 +875,23 @@ open class CameraActivity : AppCompatActivity() {
                 CameraController.IMAGE_ANALYSIS
             }
             CameraMode.PHOTO -> {
-                cameraController.imageCaptureTargetSize = CameraController.OutputSize(aspectRatio)
+                cameraController.imageCaptureTargetSize = CameraController.OutputSize(
+                    sharedPreferences.aspectRatio
+                )
                 CameraController.IMAGE_CAPTURE
             }
             CameraMode.VIDEO -> {
                 // Fallback to highest supported video quality
-                if (!camera.supportedVideoQualities.contains(videoQuality)) {
-                    sharedPreferences.videoQuality = camera.supportedVideoQualities.first()
+                if (!supportedVideoQualities.contains(sharedPreferences.videoQuality)) {
+                    sharedPreferences.videoQuality = supportedVideoQualities.first()
                 }
-                cameraController.videoCaptureTargetQuality = videoQuality
+                cameraController.videoCaptureTargetQuality = sharedPreferences.videoQuality
+
+                // Set proper video framerate
+                sharedPreferences.videoFramerate = (Framerate::getLowerOrHigher)(
+                    sharedPreferences.videoFramerate ?: Framerate.FPS_30, supportedVideoFramerates
+                )
+
                 CameraController.VIDEO_CAPTURE
             }
         }
@@ -889,7 +899,7 @@ open class CameraActivity : AppCompatActivity() {
         // Only photo mode supports vendor extensions for now
         val cameraSelector = if (cameraMode == CameraMode.PHOTO) {
             cameraManager.extensionsManager.getExtensionEnabledCameraSelector(
-                camera.cameraSelector, extensionMode
+                camera.cameraSelector, sharedPreferences.photoEffect
             )
         } else {
             camera.cameraSelector
@@ -924,6 +934,34 @@ open class CameraActivity : AppCompatActivity() {
         // Bind camera controller to lifecycle
         cameraController.bindToLifecycle(this)
 
+        // Wait for camera to be ready
+        cameraController.initializationFuture.addListener({
+            // Set Camera2 CaptureRequest options
+            cameraController.camera2CameraControl?.apply {
+                captureRequestOptions = CaptureRequestOptions.Builder()
+                    .apply {
+                        setFramerate(
+                            if (cameraMode == CameraMode.VIDEO) {
+                                sharedPreferences.videoFramerate
+                            } else {
+                                null
+                            }
+                        )
+                        setStabilizationMode(
+                            (StabilizationMode::getClosestMode)(
+                                when (cameraMode) {
+                                    CameraMode.PHOTO -> sharedPreferences.imageStabilizationMode
+                                    CameraMode.VIDEO -> sharedPreferences.videoStabilizationMode
+                                    CameraMode.QR -> StabilizationMode.OFF
+                                },
+                                camera, cameraMode
+                            )
+                        )
+                    }
+                    .build()
+            } ?: Log.wtf(LOG_TAG, "Camera2CameraControl not available even with camera ready?")
+        }, ContextCompat.getMainExecutor(this))
+
         // Restore settings that can be set on the fly
         setGridMode(
             if (cameraMode != CameraMode.QR) sharedPreferences.lastGridMode else GridMode.OFF
@@ -947,6 +985,7 @@ open class CameraActivity : AppCompatActivity() {
         updateTimerModeIcon()
         updateAspectRatioIcon()
         updateVideoQualityIcon()
+        updateVideoFramerateIcon()
         updatePhotoEffectIcon()
         updateGridIcon()
         updateFlashModeIcon()
@@ -1054,6 +1093,7 @@ open class CameraActivity : AppCompatActivity() {
             timerButton.isEnabled = cameraState == CameraState.IDLE
             aspectRatioButton.isEnabled = cameraState == CameraState.IDLE
             videoQualityButton.isEnabled = cameraState == CameraState.IDLE
+            videoFramerateButton.isEnabled = cameraState == CameraState.IDLE
             effectButton.isEnabled = cameraState == CameraState.IDLE
             // Grid mode can be toggled at any time
             // Torch mode can be toggled at any time
@@ -1080,7 +1120,7 @@ open class CameraActivity : AppCompatActivity() {
             return
         }
 
-        sharedPreferences.aspectRatio = when (aspectRatio) {
+        sharedPreferences.aspectRatio = when (sharedPreferences.aspectRatio) {
             AspectRatio.RATIO_4_3 -> AspectRatio.RATIO_16_9
             AspectRatio.RATIO_16_9 -> AspectRatio.RATIO_4_3
             else -> AspectRatio.RATIO_4_3
@@ -1094,19 +1134,40 @@ open class CameraActivity : AppCompatActivity() {
             return
         }
 
-        val newVideoQuality = if (videoQuality == camera.supportedVideoQualities.first()) {
-            camera.supportedVideoQualities.last()
-        } else {
-            val index = camera.supportedVideoQualities.indexOf(videoQuality)
-            camera.supportedVideoQualities[maxOf(0, index - 1)]
-        }
+        val currentVideoQuality = sharedPreferences.videoQuality
+        val newVideoQuality = supportedVideoQualities.next(currentVideoQuality)
 
-        if (newVideoQuality == videoQuality) {
+        if (newVideoQuality == currentVideoQuality) {
             return
         }
 
         sharedPreferences.videoQuality = newVideoQuality
 
+        bindCameraUseCases()
+    }
+
+    private fun updateVideoFramerateIcon() {
+        videoFramerateButton.isEnabled = supportedVideoFramerates.size > 1
+        videoFramerateButton.isVisible = cameraMode == CameraMode.VIDEO
+
+        videoFramerateButton.text = sharedPreferences.videoFramerate?.let {
+            resources.getString(R.string.video_framerate_value, it.value)
+        } ?: resources.getString(R.string.video_framerate_auto)
+    }
+
+    private fun cycleVideoFramerate() {
+        if (!canRestartCamera()) {
+            return
+        }
+
+        val currentVideoFramerate = sharedPreferences.videoFramerate
+        val newVideoFramerate = supportedVideoFramerates.next(currentVideoFramerate)
+
+        if (newVideoFramerate == currentVideoFramerate) {
+            return
+        }
+
+        sharedPreferences.videoFramerate = newVideoFramerate
         bindCameraUseCases()
     }
 
@@ -1219,7 +1280,7 @@ open class CameraActivity : AppCompatActivity() {
     private fun updateVideoQualityIcon() {
         videoQualityButton.isVisible = cameraMode == CameraMode.VIDEO
 
-        videoQuality.let {
+        sharedPreferences.videoQuality.let {
             videoQualityButton.setCompoundDrawablesWithIntrinsicBounds(
                 0,
                 when (it) {
@@ -1333,30 +1394,13 @@ open class CameraActivity : AppCompatActivity() {
     }
 
     /**
-     * Set a photo effect and restart the camera if required
-     */
-    private fun setExtensionMode(extensionMode: Int) {
-        if (!canRestartCamera()) {
-            return
-        }
-
-        if (extensionMode == this.extensionMode) {
-            return
-        }
-
-        sharedPreferences.photoEffect = extensionMode
-
-        bindCameraUseCases()
-    }
-
-    /**
      * Update the photo effect icon based on the current value of extensionMode
      */
     private fun updatePhotoEffectIcon() {
         effectButton.isVisible =
             cameraMode == CameraMode.PHOTO && camera.supportedExtensionModes.size > 1
 
-        extensionMode.let {
+        sharedPreferences.photoEffect.let {
             effectButton.setCompoundDrawablesWithIntrinsicBounds(
                 0,
                 when (it) {
@@ -1389,12 +1433,20 @@ open class CameraActivity : AppCompatActivity() {
      * Cycle between supported photo camera effects
      */
     private fun cyclePhotoEffects() {
-        setExtensionMode(
-            if (extensionMode == camera.supportedExtensionModes.last())
-                camera.supportedExtensionModes.first()
-            else camera.supportedExtensionModes[
-                    camera.supportedExtensionModes.indexOf(extensionMode) + 1]
-        )
+        if (!canRestartCamera()) {
+            return
+        }
+
+        val currentExtensionMode = sharedPreferences.photoEffect
+        val newExtensionMode = camera.supportedExtensionModes.next(currentExtensionMode)
+
+        if (newExtensionMode == currentExtensionMode) {
+            return
+        }
+
+        sharedPreferences.photoEffect = newExtensionMode
+
+        bindCameraUseCases()
     }
 
     private fun setBrightScreen(brightScreen: Boolean) {
@@ -1545,6 +1597,7 @@ open class CameraActivity : AppCompatActivity() {
             outputUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 intent.extras?.getParcelable(MediaStore.EXTRA_OUTPUT, Uri::class.java)
             } else {
+                @Suppress("DEPRECATION")
                 intent.extras?.get(MediaStore.EXTRA_OUTPUT) as Uri
             }
         }
