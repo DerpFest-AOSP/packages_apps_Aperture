@@ -76,6 +76,7 @@ import org.lineageos.aperture.ui.GridView
 import org.lineageos.aperture.ui.HorizontalSlider
 import org.lineageos.aperture.ui.LensSelectorLayout
 import org.lineageos.aperture.ui.LevelerView
+import org.lineageos.aperture.ui.PreviewBlurView
 import org.lineageos.aperture.ui.VerticalSlider
 import org.lineageos.aperture.utils.Camera
 import org.lineageos.aperture.utils.CameraFacing
@@ -91,6 +92,7 @@ import org.lineageos.aperture.utils.ShortcutsUtils
 import org.lineageos.aperture.utils.StabilizationMode
 import org.lineageos.aperture.utils.StorageUtils
 import org.lineageos.aperture.utils.TimeUtils
+import org.lineageos.aperture.utils.TimerMode
 import java.io.FileNotFoundException
 import java.util.concurrent.ExecutorService
 import kotlin.math.abs
@@ -117,6 +119,7 @@ open class CameraActivity : AppCompatActivity() {
     private val levelerView by lazy { findViewById<LevelerView>(R.id.levelerView) }
     private val micButton by lazy { findViewById<Button>(R.id.micButton) }
     private val photoModeButton by lazy { findViewById<MaterialButton>(R.id.photoModeButton) }
+    private val previewBlurView by lazy { findViewById<PreviewBlurView>(R.id.previewBlurView) }
     private val primaryBarLayout by lazy { findViewById<ConstraintLayout>(R.id.primaryBarLayout) }
     private val proButton by lazy { findViewById<ImageButton>(R.id.proButton) }
     private val qrModeButton by lazy { findViewById<MaterialButton>(R.id.qrModeButton) }
@@ -407,7 +410,7 @@ open class CameraActivity : AppCompatActivity() {
 
         // Set secondary bottom bar button callbacks
         proButton.setOnClickListener {
-            secondaryTopBarLayout.isVisible = !secondaryTopBarLayout.isVisible
+            secondaryTopBarLayout.slide()
         }
         flashButton.setOnClickListener { cycleFlashMode() }
 
@@ -476,7 +479,7 @@ open class CameraActivity : AppCompatActivity() {
             handler.removeMessages(MSG_HIDE_EXPOSURE_SLIDER)
             handler.sendMessageDelayed(handler.obtainMessage(MSG_HIDE_EXPOSURE_SLIDER), 2000)
 
-            secondaryTopBarLayout.isVisible = false
+            secondaryTopBarLayout.slideDown()
         }
 
         // Observe preview stream state
@@ -486,6 +489,9 @@ open class CameraActivity : AppCompatActivity() {
                     // Show grid
                     gridView.alpha = 1f
                     gridView.previewView = viewFinder
+
+                    // Hide preview blur
+                    previewBlurView.isVisible = false
                 }
                 else -> {}
             }
@@ -502,6 +508,8 @@ open class CameraActivity : AppCompatActivity() {
 
             handler.removeMessages(MSG_HIDE_ZOOM_SLIDER)
             handler.sendMessageDelayed(handler.obtainMessage(MSG_HIDE_ZOOM_SLIDER), 2000)
+
+            lensSelectorLayout.onZoomRatioChanged(it.zoomRatio)
         }
 
         zoomLevel.onProgressChangedByUser = {
@@ -581,6 +589,9 @@ open class CameraActivity : AppCompatActivity() {
                 bindCameraUseCases()
             }
         }
+        lensSelectorLayout.onZoomRatioChangeCallback = {
+            cameraController.setZoomRatio(it)
+        }
 
         // Set capture preview callback
         capturePreviewLayout.onChoiceCallback = { uri ->
@@ -590,6 +601,9 @@ open class CameraActivity : AppCompatActivity() {
                 capturePreviewLayout.isVisible = false
             }
         }
+
+        // Bind viewfinder and preview blur view
+        previewBlurView.previewView = viewFinder
     }
 
     override fun onResume() {
@@ -858,6 +872,10 @@ open class CameraActivity : AppCompatActivity() {
      * Rebind cameraProvider use cases
      */
     private fun bindCameraUseCases() {
+        // Show blurred preview
+        previewBlurView.freeze()
+        previewBlurView.isVisible = true
+
         // Unbind previous use cases
         cameraController.unbind()
 
@@ -1050,7 +1068,7 @@ open class CameraActivity : AppCompatActivity() {
         sharedPreferences.lastCameraMode = cameraMode
 
         // Hide secondary top bar
-        secondaryTopBarLayout.isVisible = false
+        secondaryTopBarLayout.slideDown()
 
         bindCameraUseCases()
     }
@@ -1116,7 +1134,8 @@ open class CameraActivity : AppCompatActivity() {
             effectButton.isEnabled = cameraState == CameraState.IDLE
             // Grid mode can be toggled at any time
             // Torch mode can be toggled at any time
-            flashButton.isEnabled = cameraState == CameraState.IDLE
+            flashButton.isEnabled =
+                cameraMode != CameraMode.PHOTO || cameraState == CameraState.IDLE
             micButton.isEnabled = cameraState == CameraState.IDLE
             settingsButton.isEnabled = cameraState == CameraState.IDLE
         }
@@ -1221,12 +1240,7 @@ open class CameraActivity : AppCompatActivity() {
      * Set the specified grid mode, also updating the icon
      */
     private fun cycleGridMode() {
-        sharedPreferences.lastGridMode = when (sharedPreferences.lastGridMode) {
-            GridMode.OFF -> GridMode.ON_3
-            GridMode.ON_3 -> GridMode.ON_4
-            GridMode.ON_4 -> GridMode.ON_GOLDENRATIO
-            GridMode.ON_GOLDENRATIO -> GridMode.OFF
-        }
+        sharedPreferences.lastGridMode = sharedPreferences.lastGridMode.next()
         setGridMode(sharedPreferences.lastGridMode)
     }
 
@@ -1243,18 +1257,18 @@ open class CameraActivity : AppCompatActivity() {
             timerButton.setCompoundDrawablesWithIntrinsicBounds(
                 0,
                 when (it) {
-                    3 -> R.drawable.ic_timer_3
-                    10 -> R.drawable.ic_timer_10
-                    else -> R.drawable.ic_timer_off
+                    TimerMode.OFF -> R.drawable.ic_timer_off
+                    TimerMode.ON_3S -> R.drawable.ic_timer_3
+                    TimerMode.ON_10S -> R.drawable.ic_timer_10
                 },
                 0,
                 0
             )
             timerButton.text = resources.getText(
                 when (it) {
-                    3 -> R.string.timer_3
-                    10 -> R.string.timer_10
-                    else -> R.string.timer_off
+                    TimerMode.OFF -> R.string.timer_off
+                    TimerMode.ON_3S -> R.string.timer_3
+                    TimerMode.ON_10S -> R.string.timer_10
                 }
             )
         }
@@ -1264,11 +1278,7 @@ open class CameraActivity : AppCompatActivity() {
      * Toggle timer mode
      */
     private fun toggleTimerMode() {
-        sharedPreferences.timerMode = when (sharedPreferences.timerMode) {
-            0 -> 3
-            3 -> 10
-            else -> 0
-        }
+        sharedPreferences.timerMode = sharedPreferences.timerMode.next()
         updateTimerModeIcon()
     }
 
@@ -1658,7 +1668,7 @@ open class CameraActivity : AppCompatActivity() {
     }
 
     private fun startTimerAndRun(runnable: () -> Unit) {
-        if (sharedPreferences.timerMode <= 0 || !canRestartCamera()) {
+        if (sharedPreferences.timerMode == TimerMode.OFF || !canRestartCamera()) {
             runnable()
             return
         }
@@ -1668,7 +1678,7 @@ open class CameraActivity : AppCompatActivity() {
         countDownView.onPreviewAreaChanged(Rect().apply {
             viewFinder.getGlobalVisibleRect(this)
         })
-        countDownView.startCountDown(sharedPreferences.timerMode) {
+        countDownView.startCountDown(sharedPreferences.timerMode.seconds) {
             shutterButton.isEnabled = true
             runnable()
         }

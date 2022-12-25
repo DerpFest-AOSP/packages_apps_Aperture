@@ -69,11 +69,8 @@ class Camera(cameraInfo: CameraInfo, cameraManager: CameraManager) {
 
     val isLogical = sensors.size > 1
 
-    val focalLengths = camera2CameraInfo.getCameraCharacteristic(
-        CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS
-    ) ?: FloatArray(0)
-
     var intrinsicZoomRatio = 1f
+    val logicalZoomRatios = cameraManager.getLogicalZoomRatios(cameraId)
 
     private val supportedVideoFramerates =
         camera2CameraInfo.getCameraCharacteristic(
